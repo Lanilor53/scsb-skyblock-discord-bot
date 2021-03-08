@@ -6,10 +6,10 @@ from tabulate import tabulate
 import typing
 import time
 import json
+import os
 
-config = json.loads(open("config.cfg", "r").read())
-DISCORD_TOKEN = config["discord_token"]
-HYPIXEL_API_KEY = config["hypixel_api_key"]
+DISCORD_TOKEN = os.environ.get("discord_token")
+HYPIXEL_API_KEY = os.environ.get("hypixel_api_key")
 
 BOT_CHANNEL_ID = 818478647366647838
 HIGHDEMAND_MESSAGE_ID = 818483795400458250
