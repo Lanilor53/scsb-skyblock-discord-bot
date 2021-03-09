@@ -1,10 +1,12 @@
 import os
-import time
 import typing
+from datetime import datetime
 
 import requests
 from discord.ext import commands, tasks
 from tabulate import tabulate
+
+import database
 
 # Setting up constants
 DISCORD_TOKEN = os.environ.get("discord_token")
@@ -15,9 +17,6 @@ HIGHDEMAND_MESSAGE_ID = int(os.environ.get("highdemand_pin_id"))
 
 url = "https://api.hypixel.net/skyblock"
 bot = commands.Bot(command_prefix="!")
-
-
-# SQLite DB connection
 
 
 # Get highdemanded items on the market
@@ -33,17 +32,20 @@ async def highdemand(ctx, count: typing.Optional[int] = 10):
         await ctx.send(f'Argument should be between 1 and 10')
         return
 
-    table = _get_highdemand(count)
-    await ctx.send('Current high-demanded items:\n`' + table + '`')
+    table, timestamp = _get_highdemand_table(count)
+    date_string = datetime.utcfromtimestamp(timestamp/1000).strftime("%Y-%m-%d %H:%M:%S")
+    await ctx.send(f'Current ({date_string}) high-demanded items:\n`' + table + '`')
 
 
-def _get_highdemand(count):
-    db = requests.get(f'{url}/bazaar?key={HYPIXEL_API_KEY}').json()['products']
+def _get_highdemand_table(count):
+    products_object = database.get_last_products_batch()
+    last_timestamp = products_object[0].timestamp
+
     volume_diffs = {}
-    for item in db.keys():
-        if db[item]["quick_status"]["buyVolume"] == 0 and db[item]["quick_status"]["sellVolume"] == 0:
+    for item in products_object:
+        if item.buy_volume == 0 and item.sell_volume == 0:
             continue
-        volume_diff = db[item]["quick_status"]["buyVolume"] - db[item]["quick_status"]["sellVolume"]
+        volume_diff = item.buy_volume - item.sell_volume
         volume_diffs[item] = volume_diff
     # Generate top list
     top_list = []
@@ -55,34 +57,44 @@ def _get_highdemand(count):
             if volume_diffs[key] > max_diff:
                 max_item = key
                 max_diff = volume_diffs[key]
-        max_item_sell_volume = db[max_item]['quick_status']['sellVolume']
-        max_item_buy_volume = db[max_item]['quick_status']['buyVolume']
-        max_item_buy_price = db[max_item]['quick_status']['buyPrice']
-        max_item_sell_price = db[max_item]['quick_status']['sellPrice']
+        max_item_sell_volume = max_item.sell_volume
+        max_item_buy_volume = max_item.buy_volume
+        max_item_buy_price = max_item.buy_price
+        max_item_sell_price = max_item.sell_price
         max_item_price_diff = max_item_buy_price - max_item_sell_price
         top_list.append(
-            [max_item, max_item_sell_volume, max_item_buy_volume, max_diff, max_item_buy_price, max_item_sell_price,
+            [max_item.product_id, max_item_sell_volume, max_item_buy_volume, max_diff, max_item_buy_price,
+             max_item_sell_price,
              max_item_price_diff])
         volume_diffs.pop(max_item)
 
     return tabulate(top_list, headers=["Name", "Sell volume", "Buy volume", "Volume diff", "Buy price", "Sell price",
-                                       "Price diff"], tablefmt="pipe", stralign="left", numalign="left")
+                                       "Price diff"], tablefmt="pipe", stralign="left", numalign="left"), last_timestamp
+
+
+def _update_bazaar_data():
+    bazaar_data = requests.get(f'{url}/bazaar?key={HYPIXEL_API_KEY}').json()
+    database.add_products_batch(bazaar_data)
 
 
 # Setup and start the bot
-
-@tasks.loop(minutes=3)
-async def update_highdemand_message():
+# TODO: if highdemand has a volumediff that is < 1 - @everyone with the product
+@tasks.loop(minutes=5)
+async def do_update():
+    # Update SkyBlock's bazaar data
+    _update_bazaar_data()
+    # Update high demand products message
     message = await bot.get_channel(BOT_CHANNEL_ID).fetch_message(HIGHDEMAND_MESSAGE_ID)
-    table = _get_highdemand(10)
+    table, last_timestamp = _get_highdemand_table(10)
     print("Updating pinned highdemand message")
-    await message.edit(content=f'Current high-demanded items (updated on {time.ctime()}):\n`' + table + '`',
+    date_string = datetime.utcfromtimestamp(last_timestamp/1000).strftime("%Y-%m-%d %H:%M:%S")
+    await message.edit(content=f'Current high-demanded items (updated on {date_string}' + '\n`' + table + '`',
                        suppress=True)
 
 
 @bot.event
 async def on_ready():
-    update_highdemand_message.start()
+    do_update.start()
     print('GO GO GO')
 
 
