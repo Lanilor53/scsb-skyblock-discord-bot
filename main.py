@@ -11,8 +11,8 @@ import os
 DISCORD_TOKEN = os.environ.get("discord_token")
 HYPIXEL_API_KEY = os.environ.get("hypixel_api_key")
 
-BOT_CHANNEL_ID = 818478647366647838
-HIGHDEMAND_MESSAGE_ID = 818483795400458250
+BOT_CHANNEL_ID = int(os.environ.get("bot_channel_id"))
+HIGHDEMAND_MESSAGE_ID = int(os.environ.get("highdemand_pin_id"))
 
 url = "https://api.hypixel.net/skyblock"
 bot = commands.Bot(command_prefix ="!")
