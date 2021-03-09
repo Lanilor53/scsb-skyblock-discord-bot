@@ -8,6 +8,7 @@ import time
 import json
 import os
 
+# Setting up constants
 DISCORD_TOKEN = os.environ.get("discord_token")
 HYPIXEL_API_KEY = os.environ.get("hypixel_api_key")
 
@@ -17,6 +18,7 @@ HIGHDEMAND_MESSAGE_ID = int(os.environ.get("highdemand_pin_id"))
 url = "https://api.hypixel.net/skyblock"
 bot = commands.Bot(command_prefix ="!")
 
+# Get highdemanded items on the market
 @bot.command()
 async def highdemand(ctx, count: typing.Optional[int] = 10):
   try:
@@ -60,6 +62,8 @@ def _get_highdemand(count):
     volume_diffs.pop(max_item)
  
   return tabulate(top_list, headers=["Name", "Sell volume", "Buy volume", "Volume diff", "Buy price", "Sell price", "Price diff"], tablefmt="pipe", stralign="left", numalign="left")
+
+# Setup and start the bot
 
 @tasks.loop(minutes=3)
 async def update_highdemand_message():
