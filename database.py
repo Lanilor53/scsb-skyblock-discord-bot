@@ -1,3 +1,5 @@
+import time
+
 from sqlalchemy import create_engine, Column, Integer, String, Float, MetaData, Table
 from sqlalchemy import func
 from sqlalchemy.ext.declarative import declarative_base
@@ -26,7 +28,6 @@ if not engine.dialect.has_table(engine, BAZAAR_PRODUCTS_TABLE_NAME):  # If table
     # Implement the creation
     metadata.create_all()
 
-
 Session = sessionmaker(bind=engine)
 
 Base = declarative_base()
@@ -52,7 +53,7 @@ class TimestampedBazaarProduct(Base):
 
 def add_products_batch(bazaar_data):
     products = bazaar_data["products"]
-    timestamp = bazaar_data["lastUpdated"]
+    timestamp = int(time.time()*1000)
     session = Session()
     for product_name in products.keys():
         product = products[product_name]
@@ -75,24 +76,71 @@ def add_products_batch(bazaar_data):
 # TODO: add "byTimestamp"
 def get_all_products_batches():
     session = Session()
-    session.query(TimestampedBazaarProduct).all()
+    batches = session.query(TimestampedBazaarProduct).all()
     session.commit()
+    return batches
 
 
 def get_last_products_batch():
     session = Session()
     last_timestamp = (
         session.query(TimestampedBazaarProduct.timestamp, func.max(TimestampedBazaarProduct.timestamp))
-        .limit(1)
-        .one_or_none()
+            .limit(1)
+            .one_or_none()
     )[0]
     if last_timestamp is None:
         print("[!!!!!!] " + str(last_timestamp))
         raise
     last_batch = (
         session.query(TimestampedBazaarProduct)
-        .filter(TimestampedBazaarProduct.timestamp == last_timestamp)
-        .all()
+            .filter(TimestampedBazaarProduct.timestamp == last_timestamp)
+            .all()
     )
     session.commit()
     return last_batch
+
+
+def get_products_batches_by_timestamp(timestamp):
+    session = Session()
+    batch = (
+        session.query(TimestampedBazaarProduct)
+            .filter(TimestampedBazaarProduct.timestamp == timestamp)
+            .all()
+    )
+    session.commit()
+    return batch
+
+
+def get_sorted_batch(sort="asc", limit=10, timestamp=None):
+    session = Session()
+    if sort == "desc":
+        sort_criterion = TimestampedBazaarProduct.sell_volume.desc()
+    else:
+        sort_criterion = TimestampedBazaarProduct.sell_volume.asc()
+    if timestamp is None:
+        filtered = session.query(TimestampedBazaarProduct)
+    else:
+        filtered = session.query(TimestampedBazaarProduct).filter(TimestampedBazaarProduct.timestamp == timestamp)
+    batch = (filtered.order_by(sort_criterion)
+             .limit(limit)
+             .all()
+             )
+    session.commit()
+    return batch
+
+
+def get_all_timestamps(sort="asc"):
+    session = Session()
+    if sort == "desc":
+        sort_criterion = TimestampedBazaarProduct.timestamp.desc()
+    else:
+        sort_criterion = TimestampedBazaarProduct.timestamp.asc()
+    timestamps_tuples = (
+        session.query(TimestampedBazaarProduct.timestamp).order_by(sort_criterion).all()
+    )
+    timestamps = set()
+    for i in timestamps_tuples:
+        timestamps.add(i[0])
+    print(f"Timestamps from get_all_timestamps {timestamps}")
+    session.commit()
+    return timestamps

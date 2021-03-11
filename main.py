@@ -2,9 +2,11 @@ import os
 import typing
 from datetime import datetime
 
+import discord
 import requests
 from discord.ext import commands, tasks
 from tabulate import tabulate
+import matplotlib.pyplot as plt
 
 import database
 
@@ -33,8 +35,25 @@ async def highdemand(ctx, count: typing.Optional[int] = 10):
         return
 
     table, timestamp = _get_highdemand_table(count)
-    date_string = datetime.utcfromtimestamp(timestamp/1000).strftime("%Y-%m-%d %H:%M:%S")
+    date_string = datetime.utcfromtimestamp(timestamp / 1000).strftime("%Y-%m-%d %H:%M:%S")
     await ctx.send(f'Current ({date_string}) high-demanded items:\n`' + table + '`')
+
+
+@bot.command()
+async def sellgraph(ctx, count: typing.Optional[int] = 5):
+    try:
+        count = int(count)
+    except ValueError or TypeError:
+        await ctx.send("Couldn't parse argument")
+        return
+
+    if count > 10 or count < 1:
+        await ctx.send(f'Argument should be between 1 and 10')
+        return
+
+    graph_filename = _get_sell_volume_leaders_graph(count)
+    graph = discord.File(graph_filename, filename="graph.png")
+    await ctx.send("Here's your graph", file=graph)
 
 
 def _get_highdemand_table(count):
@@ -72,6 +91,45 @@ def _get_highdemand_table(count):
                                        "Price diff"], tablefmt="pipe", stralign="left", numalign="left"), last_timestamp
 
 
+def _get_sell_volume_leaders_graph(count):
+    # Get all timestamps in DB
+    timestamps = list(database.get_all_timestamps("asc"))
+    timestamps.sort()
+    sell_volumes = {}
+    for ts_num in range(len(timestamps)):
+        # Get {count} leaders of sell volumes at that time
+        leaders = database.get_sorted_batch("desc", count, timestamps[ts_num])
+        for product in leaders:
+            if product.product_id not in sell_volumes.keys():
+                sell_volumes[product.product_id] = []
+                # Use None as value for all previous timestamps
+                for _ in range(ts_num):
+                    sell_volumes[product.product_id].append(None)
+                sell_volumes[product.product_id].append(product.sell_volume)
+            else:
+                sell_volumes[product.product_id].append(product.sell_volume)
+                print(f"Product {product.product_id} | Sells {sell_volumes[product.product_id]}")
+        # Update sell_volume with None where product is not a leader anymore
+        for key in sell_volumes.keys():
+            if key not in list(i.product_id for i in leaders):
+                sell_volumes[key].append(None)
+    # Now we have list [timestamps] and [sell_volumes] for every leader at those stamps
+    # Plotting
+    px = 1 / plt.rcParams['figure.dpi']  # pixel in inches
+    fig, ax = plt.subplots(figsize=(1000 * px, 1000 * px))
+    for product_id in sell_volumes.keys():
+        print(f"Timestamps: {timestamps}")
+        print(f"Sells: {sell_volumes[product_id]}")
+        ax.plot(list(datetime.utcfromtimestamp(i/1000) for i in timestamps), sell_volumes[product_id], label=product_id)
+    ax.set(xlabel='Timestamp', ylabel='Sell volume',
+           title='Sell volume leaders by timestamp')
+    ax.grid()
+    ax.legend()
+
+    fig.savefig("graphs/test.png")
+    return "graphs/test.png"
+
+
 def _update_bazaar_data():
     bazaar_data = requests.get(f'{url}/bazaar?key={HYPIXEL_API_KEY}').json()
     database.add_products_batch(bazaar_data)
@@ -79,15 +137,19 @@ def _update_bazaar_data():
 
 # Setup and start the bot
 # TODO: if highdemand has a volumediff that is < 1 - @everyone with the product
-@tasks.loop(minutes=5)
+@tasks.loop(minutes=1)
 async def do_update():
     # Update SkyBlock's bazaar data
     _update_bazaar_data()
+
+    # TODO: Debug stuff
+    print(database.get_all_timestamps())
+    print(database.get_all_products_batches())
     # Update high demand products message
     message = await bot.get_channel(BOT_CHANNEL_ID).fetch_message(HIGHDEMAND_MESSAGE_ID)
     table, last_timestamp = _get_highdemand_table(10)
     print("Updating pinned highdemand message")
-    date_string = datetime.utcfromtimestamp(last_timestamp/1000).strftime("%Y-%m-%d %H:%M:%S")
+    date_string = datetime.utcfromtimestamp(last_timestamp / 1000).strftime("%Y-%m-%d %H:%M:%S")
     await message.edit(content=f'Current high-demanded items (updated on {date_string}' + '\n`' + table + '`',
                        suppress=True)
 
