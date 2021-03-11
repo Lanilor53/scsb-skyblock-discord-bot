@@ -111,12 +111,12 @@ def get_products_batches_by_timestamp(timestamp):
     return batch
 
 
-def get_sorted_batch(sort="asc", limit=10, timestamp=None):
+def get_sorted_batch(sort_by, sort="asc", limit=10, timestamp=None):
     session = Session()
     if sort == "desc":
-        sort_criterion = TimestampedBazaarProduct.sell_volume.desc()
+        sort_criterion = sort_by.desc()
     else:
-        sort_criterion = TimestampedBazaarProduct.sell_volume.asc()
+        sort_criterion = sort_by.asc()
     if timestamp is None:
         filtered = session.query(TimestampedBazaarProduct)
     else:

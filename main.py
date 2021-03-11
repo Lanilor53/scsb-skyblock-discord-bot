@@ -55,6 +55,21 @@ async def sellgraph(ctx, count: typing.Optional[int] = 5):
     graph = discord.File(graph_filename, filename="graph.png")
     await ctx.send("Here's your graph", file=graph)
 
+@bot.command()
+async def sellpricegraph(ctx, count: typing.Optional[int] = 5):
+    try:
+        count = int(count)
+    except ValueError or TypeError:
+        await ctx.send("Couldn't parse argument")
+        return
+
+    if count > 10 or count < 1:
+        await ctx.send(f'Argument should be between 1 and 10')
+        return
+
+    graph_filename = _get_sell_price_leaders_graph(count)
+    graph = discord.File(graph_filename, filename="graph.png")
+    await ctx.send("Here's your graph", file=graph)
 
 def _get_highdemand_table(count):
     products_object = database.get_last_products_batch()
@@ -98,7 +113,7 @@ def _get_sell_volume_leaders_graph(count):
     sell_volumes = {}
     for ts_num in range(len(timestamps)):
         # Get {count} leaders of sell volumes at that time
-        leaders = database.get_sorted_batch("desc", count, timestamps[ts_num])
+        leaders = database.get_sorted_batch(database.TimestampedBazaarProduct.sell_volume, "desc", count, timestamps[ts_num])
         for product in leaders:
             if product.product_id not in sell_volumes.keys():
                 sell_volumes[product.product_id] = []
@@ -128,6 +143,45 @@ def _get_sell_volume_leaders_graph(count):
 
     fig.savefig("graphs/test.png")
     return "graphs/test.png"
+
+def _get_sell_price_leaders_graph(count):
+    # TODO: extract and do "get_leaders_graph(type, count)"
+    # Get all timestamps in DB
+    timestamps = list(database.get_all_timestamps("asc"))
+    timestamps.sort()
+    sell_prices = {}
+    for ts_num in range(len(timestamps)):
+        # Get {count} leaders of sell prices at that time
+        leaders = database.get_sorted_batch(database.TimestampedBazaarProduct.sell_price,"desc", count, timestamps[ts_num])
+        for product in leaders:
+            if product.product_id not in sell_prices.keys():
+                sell_prices[product.product_id] = []
+                # Use None as value for all previous timestamps
+                for _ in range(ts_num):
+                    sell_prices[product.product_id].append(None)
+                sell_prices[product.product_id].append(product.sell_volume)
+            else:
+                sell_prices[product.product_id].append(product.sell_volume)
+                print(f"Product {product.product_id} | Sells {sell_prices[product.product_id]}")
+        # Update sell_volume with None where product is not a leader anymore
+        for key in sell_prices.keys():
+            if key not in list(i.product_id for i in leaders):
+                sell_prices[key].append(None)
+    # Now we have list [timestamps] and [sell_prices] for every leader at those stamps
+    # Plotting
+    px = 1 / plt.rcParams['figure.dpi']  # pixel in inches
+    fig, ax = plt.subplots(figsize=(1000 * px, 1000 * px))
+    for product_id in sell_prices.keys():
+        print(f"Timestamps: {timestamps}")
+        print(f"Sell prices: {sell_prices[product_id]}")
+        ax.plot(list(datetime.utcfromtimestamp(i/1000) for i in timestamps), sell_prices[product_id], label=product_id)
+    ax.set(xlabel='Timestamp', ylabel='Sell price',
+           title='Sell price leaders by timestamp')
+    ax.grid()
+    ax.legend()
+
+    fig.savefig("graphs/sellprice.png")
+    return "graphs/sellprice.png"
 
 
 def _update_bazaar_data():
