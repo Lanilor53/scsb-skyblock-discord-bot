@@ -53,7 +53,7 @@ class TimestampedBazaarProduct(Base):
 
 def add_products_batch(bazaar_data):
     products = bazaar_data["products"]
-    timestamp = int(time.time()*1000)
+    timestamp = int(time.time() * 1000)
     session = Session()
     for product_name in products.keys():
         product = products[product_name]
@@ -141,6 +141,5 @@ def get_all_timestamps(sort="asc"):
     timestamps = set()
     for i in timestamps_tuples:
         timestamps.add(i[0])
-    print(f"Timestamps from get_all_timestamps {timestamps}")
     session.commit()
     return timestamps

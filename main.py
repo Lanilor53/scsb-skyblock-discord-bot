@@ -1,3 +1,4 @@
+import operator
 import os
 import typing
 from datetime import datetime
@@ -9,6 +10,7 @@ from tabulate import tabulate
 import matplotlib.pyplot as plt
 
 import database
+import itemsrepo
 
 # Setting up constants
 DISCORD_TOKEN = os.environ.get("discord_token")
@@ -71,6 +73,57 @@ async def sellpricegraph(ctx, count: typing.Optional[int] = 5):
     graph_filename = _get_sell_price_leaders_graph(count)
     graph = discord.File(graph_filename, filename="graph.png")
     await ctx.send("Here's your graph", file=graph)
+
+
+# depth-1 crafting income generator
+@bot.command()
+async def profitablecraft(ctx):
+    # TODO: hardcoded for now
+    LIMIT = 7
+    bazaar_items = database.get_last_products_batch()
+    # awful workaround for getByName()
+    # TODO: god please rework database
+    bazaar_items_dict = {}
+    for i in bazaar_items:
+        bazaar_items_dict[i.product_id] = i
+    profits = {}
+    for item in bazaar_items:
+        if item.buy_volume == 0 and item.sell_volume == 0:
+            continue
+        try:
+            ingredients = itemsrepo.get_ingredients(item.product_id)
+            ingredients_price = 0
+            for i in ingredients.keys():
+                splitted = i.split(":")
+
+                item_name = splitted[0]
+                if len(splitted) > 1:
+                    count = int(splitted[1])
+                else:
+                    count = 1
+
+                ingredients_price += ingredients[i] * count * bazaar_items_dict[item_name].buy_price
+            # TODO: maybe use median sell price
+            if item.sell_price > ingredients_price:
+                profits[item.product_id] = (item.sell_price - ingredients_price,
+                                            ingredients)
+        except itemsrepo.ItemNotFoundError:
+            # print(f"Not found:{item.product_id}")
+            continue
+        except itemsrepo.NoRecipeError:
+            #    print(f"Recipe not found:{item.product_id}")
+            continue
+        except KeyError:
+            continue
+    profits_list = []
+    for item in profits:
+        name = item
+        profit = profits[item][0]
+        ingredients = profits[item][1]
+        profits_list.append([name, profit, ingredients])
+    sorted_profits = sorted(profits_list, key=operator.itemgetter(1))
+    await ctx.send('`' + tabulate(sorted_profits[:LIMIT:-1], headers=["Name", "Profit", "Ingredients"],
+                                  tablefmt="pipe", stralign="left", numalign="left") + '`')
 
 
 def _get_highdemand_table(count):
@@ -203,9 +256,6 @@ async def do_update():
     # Update SkyBlock's bazaar data
     _update_bazaar_data()
 
-    # TODO: Debug stuff
-    print(database.get_all_timestamps())
-    print(database.get_all_products_batches())
     # Update high demand products message
     message = await bot.get_channel(BOT_CHANNEL_ID).fetch_message(HIGHDEMAND_MESSAGE_ID)
     table, last_timestamp = _get_highdemand_table(10)
