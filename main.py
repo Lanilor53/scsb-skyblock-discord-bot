@@ -1,6 +1,7 @@
 import operator
 import os
 import typing
+import logging
 from datetime import datetime
 
 import discord
@@ -11,6 +12,13 @@ import matplotlib.pyplot as plt
 
 import database
 import itemsrepo
+
+# Set up logging
+log = logging.getLogger("main")
+logging.basicConfig(filename="scsb-skyblock-bot.log",
+                    format="%(asctime)s %(name)-30s %(levelname)-8s %(message)s",
+                    level=logging.INFO)
+log.error("test")
 
 # Setting up constants
 DISCORD_TOKEN = os.environ.get("discord_token")
@@ -108,10 +116,10 @@ async def profitablecraft(ctx):
                 profits[item.product_id] = (item.sell_price - ingredients_price,
                                             ingredients)
         except itemsrepo.ItemNotFoundError:
-            # print(f"Not found:{item.product_id}")
+            # log.info(f"profitablecraft() - Not found:{item.product_id}")
             continue
         except itemsrepo.NoRecipeError:
-            #    print(f"Recipe not found:{item.product_id}")
+            # log.info(f"profitablecraft() - Recipe not found:{item.product_id}")
             continue
         except KeyError:
             continue
@@ -179,7 +187,6 @@ def _get_sell_volume_leaders_graph(count):
                 sell_volumes[product.product_id].append(product.sell_volume)
             else:
                 sell_volumes[product.product_id].append(product.sell_volume)
-                print(f"Product {product.product_id} | Sells {sell_volumes[product.product_id]}")
         # Update sell_volume with None where product is not a leader anymore
         for key in sell_volumes.keys():
             if key not in list(i.product_id for i in leaders):
@@ -189,8 +196,6 @@ def _get_sell_volume_leaders_graph(count):
     px = 1 / plt.rcParams['figure.dpi']  # pixel in inches
     fig, ax = plt.subplots(figsize=(1000 * px, 1000 * px))
     for product_id in sell_volumes.keys():
-        print(f"Timestamps: {timestamps}")
-        print(f"Sells: {sell_volumes[product_id]}")
         ax.plot(list(datetime.utcfromtimestamp(i / 1000) for i in timestamps), sell_volumes[product_id],
                 label=product_id)
     ax.set(xlabel='Timestamp', ylabel='Sell volume',
@@ -221,7 +226,6 @@ def _get_sell_price_leaders_graph(count):
                 sell_prices[product.product_id].append(product.sell_volume)
             else:
                 sell_prices[product.product_id].append(product.sell_volume)
-                print(f"Product {product.product_id} | Sells {sell_prices[product.product_id]}")
         # Update sell_volume with None where product is not a leader anymore
         for key in sell_prices.keys():
             if key not in list(i.product_id for i in leaders):
@@ -231,8 +235,6 @@ def _get_sell_price_leaders_graph(count):
     px = 1 / plt.rcParams['figure.dpi']  # pixel in inches
     fig, ax = plt.subplots(figsize=(1000 * px, 1000 * px))
     for product_id in sell_prices.keys():
-        print(f"Timestamps: {timestamps}")
-        print(f"Sell prices: {sell_prices[product_id]}")
         ax.plot(list(datetime.utcfromtimestamp(i / 1000) for i in timestamps), sell_prices[product_id],
                 label=product_id)
     ax.set(xlabel='Timestamp', ylabel='Sell price',
@@ -259,7 +261,7 @@ async def do_update():
     # Update high demand products message
     message = await bot.get_channel(BOT_CHANNEL_ID).fetch_message(HIGHDEMAND_MESSAGE_ID)
     table, last_timestamp = _get_highdemand_table(10)
-    print("Updating pinned highdemand message")
+    log.info("Updating pinned highdemand message")
     date_string = datetime.utcfromtimestamp(last_timestamp / 1000).strftime("%Y-%m-%d %H:%M:%S")
     await message.edit(content=f'Current high-demanded items (updated on {date_string}' + '\n`' + table + '`',
                        suppress=True)
@@ -268,7 +270,7 @@ async def do_update():
 @bot.event
 async def on_ready():
     do_update.start()
-    print('GO GO GO')
+    log.info('SSB Started')
 
 
 bot.run(DISCORD_TOKEN)

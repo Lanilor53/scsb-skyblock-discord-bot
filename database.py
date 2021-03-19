@@ -1,3 +1,4 @@
+import logging
 import time
 
 from sqlalchemy import create_engine, Column, Integer, String, Float, MetaData, Table
@@ -5,11 +6,13 @@ from sqlalchemy import func
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 
+log = logging.getLogger(__name__)
+
 engine = create_engine('sqlite:///bazaar_data.db', echo=False)
 
 BAZAAR_PRODUCTS_TABLE_NAME = 'bazaar_products'
 
-if not engine.dialect.has_table(engine, BAZAAR_PRODUCTS_TABLE_NAME):  # If table don't exist, Create.
+if not engine.dialect.has_table(engine, BAZAAR_PRODUCTS_TABLE_NAME):  # if table don't exist, create it
     metadata = MetaData(engine)
     # Create a table with the appropriate Columns
     Table(BAZAAR_PRODUCTS_TABLE_NAME, metadata,
@@ -89,7 +92,7 @@ def get_last_products_batch():
             .one_or_none()
     )[0]
     if last_timestamp is None:
-        print("[!!!!!!] " + str(last_timestamp))
+        log.error(f"No last timestamp:{str(last_timestamp)}")
         raise
     last_batch = (
         session.query(TimestampedBazaarProduct)
