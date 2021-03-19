@@ -15,8 +15,7 @@ import itemsrepo
 
 # Set up logging
 log = logging.getLogger("main")
-logging.basicConfig(filename="scsb-skyblock-bot.log",
-                    format="%(asctime)s %(name)-30s %(levelname)-8s %(message)s",
+logging.basicConfig(format="%(name)-30s %(levelname)-8s %(message)s",
                     level=logging.INFO)
 log.error("test")
 
@@ -116,10 +115,10 @@ async def profitablecraft(ctx):
                 profits[item.product_id] = (item.sell_price - ingredients_price,
                                             ingredients)
         except itemsrepo.ItemNotFoundError:
-            # log.info(f"profitablecraft() - Not found:{item.product_id}")
+            # log.info(f"Not found:{item.product_id}")
             continue
         except itemsrepo.NoRecipeError:
-            # log.info(f"profitablecraft() - Recipe not found:{item.product_id}")
+            # log.info(f"Recipe not found:{item.product_id}")
             continue
         except KeyError:
             continue
