@@ -28,6 +28,8 @@ class Item:
             self.displayName = item_json["displayname"]
             while self.displayName[1] == "§":
                 self.displayName = self.displayName[3:]
+            while self.displayName[0] == "§":
+                self.displayName = self.displayName[2:]
             try:
                 self.recipe = item_json["recipe"]
             except KeyError:
