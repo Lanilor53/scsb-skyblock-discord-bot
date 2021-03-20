@@ -1,23 +1,29 @@
+import logging
 import operator
 import os
 import typing
-import logging
 from datetime import datetime
 
 import discord
+import matplotlib.pyplot as plt
 import requests
 from discord.ext import commands, tasks
 from tabulate import tabulate
-import matplotlib.pyplot as plt
 
 import database
-import itemsrepo
+import items
 
 # Set up logging
 log = logging.getLogger("main")
 logging.basicConfig(format="%(name)-30s %(levelname)-8s %(message)s",
-                    level=logging.INFO)
-log.error("test")
+                    level=logging.INFO,
+                    filename="scsb-skyblock-bot.log")
+
+# Set up tabulate
+TABLEFMT = "plain"
+STRALIGN = "left"
+NUMALIGN = "left"
+FLOATFMT = ".1f"
 
 # Setting up constants
 DISCORD_TOKEN = os.environ.get("discord_token")
@@ -43,13 +49,31 @@ async def highdemand(ctx, count: typing.Optional[int] = 10):
         await ctx.send(f'Argument should be between 1 and 10')
         return
 
-    table, timestamp = _get_highdemand_table(count)
-    date_string = datetime.utcfromtimestamp(timestamp / 1000).strftime("%Y-%m-%d %H:%M:%S")
+    headers = ["Name", "Sell volume", "Buy volume", "Volume diff", "Buy price", "Sell price",
+               "Price diff"]
+    table = tabulate(_get_highdemanded()[:count], headers=headers,
+                     tablefmt=TABLEFMT,
+                     stralign=STRALIGN,
+                     numalign=NUMALIGN,
+                     floatfmt=FLOATFMT)
+    date_string = datetime.utcfromtimestamp(items.timestamps[-1] / 1000).strftime("%Y-%m-%d %H:%M:%S")
     await ctx.send(f'Current ({date_string}) high-demanded items:\n`' + table + '`')
 
 
 @bot.command()
-async def sellgraph(ctx, count: typing.Optional[int] = 5):
+async def graph(ctx, attribute: typing.Optional[str] = None, count: typing.Optional[int] = 5):
+    if attribute is None and count == 5:
+        help_msg = "Attributes you can use:\n"
+        help_msg += "buyPrice - price to buy item\n" \
+                    "buyVolume - sum of all buy order volumes\n" \
+                    "buyMovingWeek - how much buy price changed since last week\n" \
+                    "buyOrders - buy orders quantity\n" \
+                    "sellPrice - price to sell item\n" \
+                    "sellVolume - sum of all sell order volumes\n" \
+                    "sellOrders - sell orders quantity\n"
+        await ctx.send(help_msg)
+        return
+
     try:
         count = int(count)
     except ValueError or TypeError:
@@ -60,26 +84,13 @@ async def sellgraph(ctx, count: typing.Optional[int] = 5):
         await ctx.send(f'Argument should be between 1 and 10')
         return
 
-    graph_filename = _get_sell_volume_leaders_graph(count)
-    graph = discord.File(graph_filename, filename="graph.png")
-    await ctx.send("Here's your graph", file=graph)
-
-
-@bot.command()
-async def sellpricegraph(ctx, count: typing.Optional[int] = 5):
     try:
-        count = int(count)
-    except ValueError or TypeError:
-        await ctx.send("Couldn't parse argument")
+        graph_filename = _get_top_graph(attribute, count)
+    except KeyError:
+        await ctx.send("No such attribute!")
         return
-
-    if count > 10 or count < 1:
-        await ctx.send(f'Argument should be between 1 and 10')
-        return
-
-    graph_filename = _get_sell_price_leaders_graph(count)
-    graph = discord.File(graph_filename, filename="graph.png")
-    await ctx.send("Here's your graph", file=graph)
+    graph_file = discord.File(graph_filename, filename="graph.png")
+    await ctx.send("Here's your graph", file=graph_file)
 
 
 # depth-1 crafting income generator
@@ -87,37 +98,24 @@ async def sellpricegraph(ctx, count: typing.Optional[int] = 5):
 async def profitablecraft(ctx):
     # TODO: hardcoded for now
     LIMIT = 7
-    bazaar_items = database.get_last_products_batch()
-    # awful workaround for getByName()
-    # TODO: god please rework database
-    bazaar_items_dict = {}
-    for i in bazaar_items:
-        bazaar_items_dict[i.product_id] = i
+    last_batch = items.last_batch
     profits = {}
-    for item in bazaar_items:
-        if item.buy_volume == 0 and item.sell_volume == 0:
+    for item in last_batch:
+        if item.bazaarStatus["buyVolume"] == 0 and item.bazaarStatus["sellVolume"] == 0:
             continue
         try:
-            ingredients = itemsrepo.get_ingredients(item.product_id)
+            ingredients = item.get_ingredients()
             ingredients_price = 0
+
             for i in ingredients.keys():
-                splitted = i.split(":")
-
-                item_name = splitted[0]
-                if len(splitted) > 1:
-                    count = int(splitted[1])
-                else:
-                    count = 1
-
-                ingredients_price += ingredients[i] * count * bazaar_items_dict[item_name].buy_price
+                ingredients_price += ingredients[i] * last_batch[i].bazaarStatus["buyPrice"]
             # TODO: maybe use median sell price
-            if item.sell_price > ingredients_price:
-                profits[item.product_id] = (item.sell_price - ingredients_price,
-                                            ingredients)
-        except itemsrepo.ItemNotFoundError:
+            if item.bazaarStatus["sellPrice"] > ingredients_price:
+                profits[item.internalName] = (item.bazaarStatus["sellPrice"] - ingredients_price, ingredients)
+        except items.ItemNotFoundError:
             # log.info(f"Not found:{item.product_id}")
             continue
-        except itemsrepo.NoRecipeError:
+        except items.NoRecipeError:
             # log.info(f"Recipe not found:{item.product_id}")
             continue
         except KeyError:
@@ -130,22 +128,19 @@ async def profitablecraft(ctx):
         profits_list.append([name, profit, ingredients])
     sorted_profits = sorted(profits_list, key=operator.itemgetter(1))
     await ctx.send('`' + tabulate(sorted_profits[:LIMIT:-1], headers=["Name", "Profit", "Ingredients"],
-                                  tablefmt="pipe", stralign="left", numalign="left") + '`')
+                                  tablefmt=TABLEFMT, stralign=STRALIGN, numalign=NUMALIGN, floatfmt=FLOATFMT) + '`')
 
 
-def _get_highdemand_table(count):
-    products_object = database.get_last_products_batch()
-    last_timestamp = products_object[0].timestamp
-
+def _get_highdemanded():
     volume_diffs = {}
-    for item in products_object:
-        if item.buy_volume == 0 and item.sell_volume == 0:
+    for item in items.last_batch:
+        if item.bazaarStatus["buyVolume"] == 0 and item.bazaarStatus["sellVolume"] == 0:
             continue
-        volume_diff = item.buy_volume - item.sell_volume
+        volume_diff = item.bazaarStatus["buyVolume"] - item.bazaarStatus["sellVolume"]
         volume_diffs[item] = volume_diff
     # Generate top list
     top_list = []
-    for i in range(count):
+    while len(volume_diffs) > 0:
         max_diff = -999999999
         max_item = ""
         # Find max diff
@@ -153,52 +148,54 @@ def _get_highdemand_table(count):
             if volume_diffs[key] > max_diff:
                 max_item = key
                 max_diff = volume_diffs[key]
-        max_item_sell_volume = max_item.sell_volume
-        max_item_buy_volume = max_item.buy_volume
-        max_item_buy_price = max_item.buy_price
-        max_item_sell_price = max_item.sell_price
-        max_item_price_diff = max_item_buy_price - max_item_sell_price
+        status = max_item.bazaarStatus
         top_list.append(
-            [max_item.product_id, max_item_sell_volume, max_item_buy_volume, max_diff, max_item_buy_price,
-             max_item_sell_price,
-             max_item_price_diff])
+            [max_item.internalName, status["sellVolume"],
+             status["buyVolume"], max_diff, status["buyPrice"],
+             status["sellPrice"],
+             status["buyPrice"] - status["sellPrice"]])
         volume_diffs.pop(max_item)
-
-    return tabulate(top_list, headers=["Name", "Sell volume", "Buy volume", "Volume diff", "Buy price", "Sell price",
-                                       "Price diff"], tablefmt="pipe", stralign="left", numalign="left"), last_timestamp
+    return top_list
 
 
-def _get_sell_volume_leaders_graph(count):
-    # Get all timestamps in DB
-    timestamps = list(database.get_all_timestamps("asc"))
-    timestamps.sort()
-    sell_volumes = {}
+def _get_top_graph(attribute: str, count: int):
+    stats_at_timestamp = {}
+    batches = database.get_all_products_batches()
+    for batch in batches:
+        leaders = sorted(batch, key=lambda k: k.__getattribute__("bazaarStatus")[attribute], reverse=True)
+        stats_at_timestamp[batch.timestamp] = leaders[:count]
+
+    timestamps = list(stats_at_timestamp.keys())
+    stat = {}
     for ts_num in range(len(timestamps)):
-        # Get {count} leaders of sell volumes at that time
-        leaders = database.get_sorted_batch(database.TimestampedBazaarProduct.sell_volume, "desc", count,
-                                            timestamps[ts_num])
-        for product in leaders:
-            if product.product_id not in sell_volumes.keys():
-                sell_volumes[product.product_id] = []
+        leaders = stats_at_timestamp[timestamps[ts_num]]
+
+        for item in leaders:
+            if item.internalName not in stat.keys():
+                stat[item.internalName] = []
                 # Use None as value for all previous timestamps
                 for _ in range(ts_num):
-                    sell_volumes[product.product_id].append(None)
-                sell_volumes[product.product_id].append(product.sell_volume)
+                    stat[item.internalName].append(None)
+                stat[item.internalName].append(item.bazaarStatus[attribute])
             else:
-                sell_volumes[product.product_id].append(product.sell_volume)
-        # Update sell_volume with None where product is not a leader anymore
-        for key in sell_volumes.keys():
-            if key not in list(i.product_id for i in leaders):
-                sell_volumes[key].append(None)
+                # An item can still be a leader, or it can "skip" a few ticks
+                if ts_num == len(stat[item.internalName]):
+                    stat[item.internalName].append(item.bazaarStatus[attribute])
+                else:
+                    # Use None as value for all skipped timestamps
+                    for _ in range(ts_num - len(stat[item.internalName])):
+                        stat[item.internalName].append(None)
+                    stat[item.internalName].append(item.bazaarStatus[attribute])
+
     # Now we have list [timestamps] and [sell_volumes] for every leader at those stamps
     # Plotting
     px = 1 / plt.rcParams['figure.dpi']  # pixel in inches
     fig, ax = plt.subplots(figsize=(1000 * px, 1000 * px))
-    for product_id in sell_volumes.keys():
-        ax.plot(list(datetime.utcfromtimestamp(i / 1000) for i in timestamps), sell_volumes[product_id],
-                label=product_id)
-    ax.set(xlabel='Timestamp', ylabel='Sell volume',
-           title='Sell volume leaders by timestamp')
+    for internal_name in stat.keys():
+        ax.plot(list(datetime.utcfromtimestamp(i / 1000) for i in timestamps), stat[internal_name],
+                label=internal_name)
+    ax.set(xlabel='Timestamp', ylabel=attribute,
+           title=f'{attribute} leaders by timestamp')
     ax.grid()
     ax.legend()
 
@@ -206,52 +203,13 @@ def _get_sell_volume_leaders_graph(count):
     return "graphs/test.png"
 
 
-def _get_sell_price_leaders_graph(count):
-    # TODO: extract and do "get_leaders_graph(type, count)"
-    # Get all timestamps in DB
-    timestamps = list(database.get_all_timestamps("asc"))
-    timestamps.sort()
-    sell_prices = {}
-    for ts_num in range(len(timestamps)):
-        # Get {count} leaders of sell prices at that time
-        leaders = database.get_sorted_batch(database.TimestampedBazaarProduct.sell_price, "desc", count,
-                                            timestamps[ts_num])
-        for product in leaders:
-            if product.product_id not in sell_prices.keys():
-                sell_prices[product.product_id] = []
-                # Use None as value for all previous timestamps
-                for _ in range(ts_num):
-                    sell_prices[product.product_id].append(None)
-                sell_prices[product.product_id].append(product.sell_volume)
-            else:
-                sell_prices[product.product_id].append(product.sell_volume)
-        # Update sell_volume with None where product is not a leader anymore
-        for key in sell_prices.keys():
-            if key not in list(i.product_id for i in leaders):
-                sell_prices[key].append(None)
-    # Now we have list [timestamps] and [sell_prices] for every leader at those stamps
-    # Plotting
-    px = 1 / plt.rcParams['figure.dpi']  # pixel in inches
-    fig, ax = plt.subplots(figsize=(1000 * px, 1000 * px))
-    for product_id in sell_prices.keys():
-        ax.plot(list(datetime.utcfromtimestamp(i / 1000) for i in timestamps), sell_prices[product_id],
-                label=product_id)
-    ax.set(xlabel='Timestamp', ylabel='Sell price',
-           title='Sell price leaders by timestamp')
-    ax.grid()
-    ax.legend()
-
-    fig.savefig("graphs/sellprice.png")
-    return "graphs/sellprice.png"
-
-
 def _update_bazaar_data():
     bazaar_data = requests.get(f'{url}/bazaar?key={HYPIXEL_API_KEY}').json()
-    database.add_products_batch(bazaar_data)
+    items.last_batch = database.add_products_batch(bazaar_data)
+    items.timestamps.append(items.last_batch.timestamp)
 
 
 # Setup and start the bot
-# TODO: if highdemand has a volumediff that is < 1 - @everyone with the product
 @tasks.loop(minutes=1)
 async def do_update():
     # Update SkyBlock's bazaar data
@@ -259,9 +217,17 @@ async def do_update():
 
     # Update high demand products message
     message = await bot.get_channel(BOT_CHANNEL_ID).fetch_message(HIGHDEMAND_MESSAGE_ID)
-    table, last_timestamp = _get_highdemand_table(10)
+
+    headers = ["Name", "Sell volume", "Buy volume", "Volume diff", "Buy price", "Sell price", "Price diff"]
+    table = tabulate(_get_highdemanded()[:10],
+                     headers=headers,
+                     tablefmt=TABLEFMT,
+                     stralign=STRALIGN,
+                     numalign=NUMALIGN,
+                     floatfmt=FLOATFMT)
+    date_string = datetime.utcfromtimestamp(items.timestamps[-1] / 1000).strftime("%Y-%m-%d %H:%M:%S")
+
     log.info("Updating pinned highdemand message")
-    date_string = datetime.utcfromtimestamp(last_timestamp / 1000).strftime("%Y-%m-%d %H:%M:%S")
     await message.edit(content=f'Current high-demanded items (updated on {date_string}' + '\n`' + table + '`',
                        suppress=True)
 
