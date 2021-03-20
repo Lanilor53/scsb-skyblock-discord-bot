@@ -91,10 +91,10 @@ async def profitablecraft(ctx, page: typing.Optional[int] = 1):
             ingredients_price = 0
 
             for i in ingredients.keys():
-                ingredients_price += ingredients[i] * last_batch[i].bazaarStatus["buyPrice"]
+                ingredients_price += ingredients[i] * i.bazaarStatus["buyPrice"]
             # TODO: maybe use median sell price
             if item.bazaarStatus["sellPrice"] > ingredients_price:
-                profits[item.internalName] = (item.bazaarStatus["sellPrice"] - ingredients_price, ingredients)
+                profits[item.displayName] = (item.bazaarStatus["sellPrice"] - ingredients_price, ingredients)
         except items.ItemNotFoundError:
             # log.info(f"Not found:{item.product_id}")
             continue
@@ -108,7 +108,8 @@ async def profitablecraft(ctx, page: typing.Optional[int] = 1):
         name = item
         profit = profits[item][0]
         ingredients = profits[item][1]
-        profits_list.append([name, profit, ingredients])
+        profits_list.append([name, profit, dict(zip([i.displayName for i in ingredients],
+                                                    [ingredients[i] for i in ingredients]))])
     sorted_profits = sorted(profits_list, key=operator.itemgetter(1), reverse=True)
     table, pagination_embed = utils.get_table_page(sorted_profits, ["Name", "Profit", "Ingredients"], page, LIMIT)
 
@@ -136,7 +137,7 @@ def _get_highdemanded():
             break
         status = max_item.bazaarStatus
         top_list.append(
-            [max_item.internalName, status["sellVolume"],
+            [max_item.displayName, status["sellVolume"],
              status["buyVolume"], max_diff, status["buyPrice"],
              status["sellPrice"],
              status["buyPrice"] - status["sellPrice"]])
@@ -157,29 +158,29 @@ def _get_top_graph(attribute: str, count: int):
         leaders = stats_at_timestamp[timestamps[ts_num]]
 
         for item in leaders:
-            if item.internalName not in stat.keys():
-                stat[item.internalName] = []
+            if item not in stat.keys():
+                stat[item] = []
                 # Use None as value for all previous timestamps
                 for _ in range(ts_num):
-                    stat[item.internalName].append(None)
-                stat[item.internalName].append(item.bazaarStatus[attribute])
+                    stat[item].append(None)
+                stat[item].append(item.bazaarStatus[attribute])
             else:
                 # An item can still be a leader, or it can "skip" a few ticks
-                if ts_num == len(stat[item.internalName]):
-                    stat[item.internalName].append(item.bazaarStatus[attribute])
+                if ts_num == len(stat[item]):
+                    stat[item].append(item.bazaarStatus[attribute])
                 else:
                     # Use None as value for all skipped timestamps
-                    for _ in range(ts_num - len(stat[item.internalName])):
-                        stat[item.internalName].append(None)
-                    stat[item.internalName].append(item.bazaarStatus[attribute])
+                    for _ in range(ts_num - len(stat[item])):
+                        stat[item].append(None)
+                    stat[item].append(item.bazaarStatus[attribute])
 
     # Now we have list [timestamps] and [sell_volumes] for every leader at those stamps
     # Plotting
     px = 1 / plt.rcParams['figure.dpi']  # pixel in inches
     fig, ax = plt.subplots(figsize=(1000 * px, 1000 * px))
-    for internal_name in stat.keys():
-        ax.plot(list(datetime.utcfromtimestamp(i / 1000) for i in timestamps), stat[internal_name],
-                label=internal_name)
+    for item in stat.keys():
+        ax.plot(list(datetime.utcfromtimestamp(i / 1000) for i in timestamps), stat[item],
+                label=item.displayName)
     ax.set(xlabel='Timestamp', ylabel=attribute,
            title=f'{attribute} leaders by timestamp')
     ax.grid()

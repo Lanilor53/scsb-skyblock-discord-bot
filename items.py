@@ -26,6 +26,8 @@ class Item:
         try:
             item_json = json.load(open(item_file))
             self.displayName = item_json["displayname"]
+            while self.displayName[1] == "§":
+                self.displayName = self.displayName[3:]
             try:
                 self.recipe = item_json["recipe"]
             except KeyError:
@@ -43,14 +45,15 @@ class Item:
             if i != '':
                 splitted = i.split(":")
                 name = splitted[0]
+                item = last_batch[name]
                 if len(splitted) > 1:
                     count = int(splitted[1])
                 else:
                     count = 1
-                if name in result.keys():
-                    result[name] += count
+                if item in result.keys():
+                    result[item] += count
                 else:
-                    result[name] = count
+                    result[item] = count
         return result
 
 
