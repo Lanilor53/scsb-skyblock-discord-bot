@@ -8,22 +8,17 @@ import discord
 import matplotlib.pyplot as plt
 import requests
 from discord.ext import commands, tasks
-from tabulate import tabulate
 
 import database
 import items
 
 # Set up logging
+import utils
+
 log = logging.getLogger("main")
 logging.basicConfig(format="%(name)-30s %(levelname)-8s %(message)s",
                     level=logging.INFO,
                     filename="scsb-skyblock-bot.log")
-
-# Set up tabulate
-TABLEFMT = "plain"
-STRALIGN = "left"
-NUMALIGN = "left"
-FLOATFMT = ".1f"
 
 # Setting up constants
 DISCORD_TOKEN = os.environ.get("discord_token")
@@ -38,26 +33,14 @@ bot = commands.Bot(command_prefix="!")
 
 # Get highdemanded items on the market
 @bot.command()
-async def highdemand(ctx, count: typing.Optional[int] = 10):
-    try:
-        count = int(count)
-    except ValueError or TypeError:
-        await ctx.send("Couldn't parse argument")
-        return
-
-    if count > 10 or count < 1:
-        await ctx.send(f'Argument should be between 1 and 10')
-        return
+async def highdemand(ctx, page: typing.Optional[int] = 1):
+    LIMIT = 10
 
     headers = ["Name", "Sell volume", "Buy volume", "Volume diff", "Buy price", "Sell price",
                "Price diff"]
-    table = tabulate(_get_highdemanded()[:count], headers=headers,
-                     tablefmt=TABLEFMT,
-                     stralign=STRALIGN,
-                     numalign=NUMALIGN,
-                     floatfmt=FLOATFMT)
+    table, pagination_embed = utils.get_table_page(_get_highdemanded(), headers, page, LIMIT)
     date_string = datetime.utcfromtimestamp(items.timestamps[-1] / 1000).strftime("%Y-%m-%d %H:%M:%S")
-    await ctx.send(f'Current ({date_string}) high-demanded items:\n`' + table + '`')
+    await ctx.send(f'Current ({date_string}) high-demanded items:\n`' + table + '`', embed=pagination_embed)
 
 
 @bot.command()
@@ -95,9 +78,9 @@ async def graph(ctx, attribute: typing.Optional[str] = None, count: typing.Optio
 
 # depth-1 crafting income generator
 @bot.command()
-async def profitablecraft(ctx):
+async def profitablecraft(ctx, page: typing.Optional[int] = 1):
     # TODO: hardcoded for now
-    LIMIT = 7
+    LIMIT = 10
     last_batch = items.last_batch
     profits = {}
     for item in last_batch:
@@ -126,9 +109,10 @@ async def profitablecraft(ctx):
         profit = profits[item][0]
         ingredients = profits[item][1]
         profits_list.append([name, profit, ingredients])
-    sorted_profits = sorted(profits_list, key=operator.itemgetter(1))
-    await ctx.send('`' + tabulate(sorted_profits[:LIMIT:-1], headers=["Name", "Profit", "Ingredients"],
-                                  tablefmt=TABLEFMT, stralign=STRALIGN, numalign=NUMALIGN, floatfmt=FLOATFMT) + '`')
+    sorted_profits = sorted(profits_list, key=operator.itemgetter(1), reverse=True)
+    table, pagination_embed = utils.get_table_page(sorted_profits, ["Name", "Profit", "Ingredients"], page, LIMIT)
+
+    await ctx.send('`' + table + '`', embed=pagination_embed)
 
 
 def _get_highdemanded():
@@ -148,6 +132,8 @@ def _get_highdemanded():
             if volume_diffs[key] > max_diff:
                 max_item = key
                 max_diff = volume_diffs[key]
+        if max_diff < 0:
+            break
         status = max_item.bazaarStatus
         top_list.append(
             [max_item.internalName, status["sellVolume"],
@@ -219,12 +205,7 @@ async def do_update():
     message = await bot.get_channel(BOT_CHANNEL_ID).fetch_message(HIGHDEMAND_MESSAGE_ID)
 
     headers = ["Name", "Sell volume", "Buy volume", "Volume diff", "Buy price", "Sell price", "Price diff"]
-    table = tabulate(_get_highdemanded()[:10],
-                     headers=headers,
-                     tablefmt=TABLEFMT,
-                     stralign=STRALIGN,
-                     numalign=NUMALIGN,
-                     floatfmt=FLOATFMT)
+    table, _ = utils.get_table_page(_get_highdemanded(), headers, 1, 10)
     date_string = datetime.utcfromtimestamp(items.timestamps[-1] / 1000).strftime("%Y-%m-%d %H:%M:%S")
 
     log.info("Updating pinned highdemand message")

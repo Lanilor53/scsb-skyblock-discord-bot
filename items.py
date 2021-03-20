@@ -34,7 +34,6 @@ class Item:
             log.info(f"Couldn't find item repo file: {item_file}")
             raise ItemNotFoundError
 
-    # TODO: parse item:count
     def get_ingredients(self):
         if self.recipe is None:
             raise NoRecipeError
@@ -44,7 +43,7 @@ class Item:
             if i != '':
                 splitted = i.split(":")
                 name = splitted[0]
-                if len(splitted)>1:
+                if len(splitted) > 1:
                     count = int(splitted[1])
                 else:
                     count = 1
